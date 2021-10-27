@@ -1,0 +1,107 @@
+#!jinja2
+
+[cylc]
+    UTC mode = True # Ignore DST
+
+[scheduling]
+    [[dependencies]]
+    # Set the order of the Cylc workflow for the DA experiment
+    graph = """
+            fcm_make => jules
+            """
+
+    # Restrict the number of jobs that can run at once *currently commented out*
+    [[queues]]
+        [[[main_run_queue]]]
+            #limit = 9
+            #members = jules
+
+
+[runtime]
+    [[root]]
+        initial scripting = """
+                            export CYLC_VERSION={{CYLC_VERSION}}
+                            export ROSE_VERSION={{ROSE_VERSION}}
+                            """
+        script = rose task-run --verbose
+        [[[events]]]
+            mail events = succeeded, failed
+
+
+	[[JASMIN]]
+        script = " rose task-run --quiet --path=/gws/nopw/j04/odanceo/epinnington/models/jules4.9/build/bin "
+        # set all the module and library paths for JULES to run on Jasmin with SLURM
+        env-script = """
+                eval $(rose task-env)
+                export PATH=/apps/jasmin/metomi/bin:$PATH
+                module load jaspy
+                module load intel/19.0.0
+                module load contrib/gnu/gcc/7.3.0
+                module load eb/OpenMPI/intel/3.1.1
+                module list 2>&1
+                env | grep LD_LIBRARY_PATH
+                export NETCDF_FORTRAN_ROOT=/home/users/siwilson/netcdf_par/3.1.1/intel.19.0.0/
+                export NETCDF_ROOT=/home/users/siwilson/netcdf_par/3.1.1/intel.19.0.0/
+                export HDF5_LIBDIR=/home/users/siwilson/netcdf_par/3.1.1/intel.19.0.0/lib
+                export I_MPI_PMI_LIBRARY=/usr/lib64/libpmi.so
+                export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$HDF5_LIBDIR
+                env | grep LD_LIBRARY_PATH
+                """
+        [[[job]]]
+            submission polling intervals = PT1M
+		    execution polling intervals = PT1M
+            batch system = slurm
+        [[[environment]]]
+            RUNID = {{ RUNID }}
+            OUTPUT_FOLDER = "/work/scratch-pw/$USER/$ROSE_SUITE_NAME"
+
+
+    [[fcm_make]]
+        # task for making JULES, not necessary if using a preinstalled JULES exe.
+        inherit = None, JASMIN
+        script = """
+                mkdir -p $OUTPUT_FOLDER
+                rose task-run --quiet --path=share/fcm_make/build/bin
+                """
+        [[[job]]]
+            batch system = background
+            execution time limit = PT10M
+        [[[environment]]]
+            # revision numbers for different JULES versions found here: https://code.metoffice.gov.uk/trac/jules/browser/main?order=name
+            JULES_REVISION = {{ JULES_REVISION }}
+            JULES_FCM = {{ JULES_FCM }}
+            NETCDF_FORTRAN_ROOT=/home/users/siwilson/netcdf.openmpi/
+            NETCDF_ROOT=/home/users/siwilson/netcdf.openmpi/
+            JULES_BUILD=normal
+            JULES_SOURCE=$JULES_FCM@vn$JULES_REVISION
+            JULES_PLATFORM = jasmin-lotus-intel
+            OUTPUT_FOLDER = "/work/scratch-pw/$USER/$ROSE_SUITE_NAME"
+
+        [[[remote]]]
+            host = {{ ROSE_ORIG_HOST }}
+
+
+    [[jules]]
+        inherit = None, JASMIN
+        script = """
+                mkdir -p $OUTPUT_FOLDER
+                #rose task-run --quiet --path=/gws/nopw/j04/odanceo/epinnington/u-bx723_jules/build/bin/
+                rose task-run --quiet --path=share/fcm_make/build/bin
+                """
+        [[[environment]]]
+            ROSE_LAUNCHER = mpirun
+            ROSE_TASK_APP = jules
+            RUNID = {{ RUNID }}
+            OUTPUT_FOLDER = "/work/scratch-pw/$USER/$ROSE_SUITE_NAME"
+            RUN_NAME = $RUNID
+           
+
+        [[[directives]]]
+            #--partition = par-multi
+            #--ntasks = {{ MPI_NUM_TASKS }}
+            #--time=10:00:00
+            #--constraint="intel"
+            --partition = test
+            --ntasks = 8
+            --time=04:00:00
+            --constraint="intel"
